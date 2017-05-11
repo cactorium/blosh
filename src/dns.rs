@@ -1,5 +1,6 @@
 use nom::{be_u8, be_u16, be_u32, rest};
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Message<'a> {
     pub header: Header,
     pub questions: Vec<Query<'a>>,
@@ -34,6 +35,7 @@ pub struct RawHeader {
     arcount: u16,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Header {
     pub id: u16,
     pub qr: QR,
@@ -114,7 +116,7 @@ named!(pub parse_dns_header< Header >,
     )
 );
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum QR {
     Query,
     Response,
@@ -130,7 +132,7 @@ impl QR {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Opcode {
     Query,
     InverseQuery,
@@ -155,6 +157,7 @@ impl Opcode {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Z;
 
 impl Z {
@@ -166,7 +169,7 @@ impl Z {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Rcode {
     NoError,
     FormatError,
@@ -195,6 +198,7 @@ impl Rcode {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Query<'a> {
     pub qname: Qname<'a>,
     pub qtype: Qtype,
@@ -215,6 +219,7 @@ named!(query<Query>,
 
 pub type Qname<'a> = DomainName<'a>;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DomainName<'a> {
     Labels(Vec<Label<'a>>),
     Pointer(u16),
@@ -260,7 +265,7 @@ named!(label,
     )
 );
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Qtype {
     Type(Type),
     Axfr,
@@ -292,7 +297,7 @@ named!(qtype<Qtype>,
     )
 );
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Qclass {
     Class(Class),
     Wildcard,
@@ -320,6 +325,7 @@ named!(qclass<Qclass>,
     )
 );
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResourceRecord<'a> {
     pub name: DomainName<'a>,
     pub typ: Type,
@@ -346,7 +352,7 @@ named!(resource_record<ResourceRecord>,
     )
 );
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Type {
     A,
     NS,
@@ -398,7 +404,7 @@ named!(parse_type<Type>,
 );
 
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Class {
     IN,
     CS,
@@ -426,6 +432,7 @@ named!(parse_class<Class>,
 );
 
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Rdata<'a> {
     Cname(DomainName<'a>),
     Hinfo(Hinfo<'a>),
@@ -547,6 +554,7 @@ impl <'a> Rdata<'a> {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Hinfo<'a> {
     pub cpu: CharacterString<'a>,
     pub os: CharacterString<'a>,
@@ -562,6 +570,7 @@ named!(hinfo<Hinfo>,
     )
 );
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Minfo<'a> {
     pub rmailbox: DomainName<'a>,
     pub emailbox: DomainName<'a>,
@@ -577,6 +586,7 @@ named!(minfo<Minfo>,
     )
 );
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MX<'a> {
     pub preference: u16,
     pub exchange: DomainName<'a>,
@@ -592,6 +602,7 @@ named!(parse_mx<MX>,
     )
 );
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Soa<'a> {
     pub mname: DomainName<'a>,
     pub rname: DomainName<'a>,
@@ -622,6 +633,7 @@ named!(parse_soa<Soa>,
     )
 );
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CharacterString<'a>(&'a [u8]);
 named!(parse_char_string<CharacterString>,
     do_parse!(
@@ -635,6 +647,7 @@ named!(parse_txt< Vec<CharacterString> >,
     many1!(parse_char_string)
 );
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Wks<'a> {
     pub address: [u8; 4],
     pub protocol: u8,
@@ -652,3 +665,52 @@ named!(parse_wks<Wks>,
         })
     )
 );
+
+#[cfg(test)]
+mod tests {
+    use nom::IResult;
+
+    use super::*;
+    #[test]
+    fn test_query() {
+        let query = [
+            0x24, 0x1a, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x03, 0x77, 0x77, 0x77,
+            0x06, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x03,
+            0x63, 0x6f, 0x6d, 0x00, 0x00, 0x01, 0x00, 0x01];
+        assert_eq!(
+            parse_dns_message(&query),
+            IResult::Done(&b""[..],
+                Message {
+                    header: Header {
+                        id: 9242,
+                        qr: QR::Query,
+                        opcode: Opcode::Query,
+                        aa: false,
+                        tc: false,
+                        rd: false,
+                        ra: true,
+                        z: Z,
+                        rcode: Rcode::NoError,
+                        qdcount: 1,
+                        ancount: 0,
+                        nscount: 0,
+                        arcount: 0
+                    },
+                    questions: vec![
+                        Query {
+                            qname: DomainName::Labels(vec![
+                                       &[119, 119, 119],
+                                       &[103, 111, 111, 103, 108, 101],
+                                       &[99, 111, 109]]),
+                            qtype: Qtype::Type(Type::A),
+                            qclass: Qclass::Class(Class::IN)
+                        }
+                    ],
+                    answers: vec![],
+                    authorities: vec![],
+                    additional: vec![]
+                })
+        );
+    }
+}
