@@ -6,9 +6,11 @@ extern crate nom;
 
 // transport level parsers
 // pub mod tcp;
+// pub mod udp;
 
 // application level parsers
 pub mod dns;
+// pub mod telnet;
 
 #[cfg(test)]
 mod tests {
