@@ -65,7 +65,7 @@ pub fn parse_tcp_packet<'a>(bs: &'a [u8]) -> IResult<&'a [u8], TcpPacket<'a>, u3
         sz: be_u16 >>
         sum: be_u16 >>
         urgent: be_u16 >>
-        options: cond!(bits.offset > 5, parse_options) >>
+        options: cond!(bits.offset > 5, apply!(parse_options, (4*bits.offset-20) as usize)) >>
         ({
             let mut header = TcpPacket {
                 src: src,
@@ -122,56 +122,85 @@ impl TcpFlags {
 }
 
 
+fn known_options<'a>(bs: &'a [u8]) -> IResult<&'a [u8], TcpOption<'a>, u32> {
+   alt!(
+        bs,
+        call!(eof_check) |
+        do_parse!(
+            _a: char!(0x01 as char) >>
+            (TcpOption::NoOperation)
+        ) |
+        do_parse!(
+            _a: char!(0x02 as char) >>
+            _a: char!(0x04 as char) >>
+            seg_size: be_u16 >>
+            (TcpOption::MaximumSegmentSize(seg_size))
+        ) |
+        do_parse!(
+            _a: char!(0x03 as char) >>
+            _a: char!(0x03 as char) >>
+            shift: be_u8 >>
+            (TcpOption::WindowScale(shift))
+        ) |
+        do_parse!(
+            _a: char!(0x08 as char) >>
+            _a: char!(0x0a as char) >>
+            ts_val: be_u32 >>
+            ts_ecr: be_u32 >>
+            (TcpOption::Timestamps(ts_val, ts_ecr))
+        ) |
+        do_parse!(
+            kind: be_u8 >>
+            len: be_u8 >>
+            data: take!(len - 2) >>
+            (TcpOption::Other(kind, len, data))
+        )
+    )
+}
 
-named!(parse_options<Vec<TcpOption> >,
+// FIXME: make this nicer
+fn eof_check<'a>(bs: &'a [u8]) -> IResult<&'a [u8], TcpOption<'a>, u32> {
+    map!(
+        bs,
+        eof!(),
+        |_| TcpOption::DummyOption)
+}
+
+fn end_of_options<'a>(bs: &'a [u8]) -> IResult<&'a [u8], TcpOption<'a>, u32> {
+    alt!(
+        bs,
+        do_parse!(
+            _a: char!(0x00 as char) >>
+            (TcpOption::EndOfOptionList)
+        ) |
+        call!(eof_check)
+    )
+}
+
+fn parse_options<'a>(bs: &'a [u8], len: usize) -> IResult<&'a [u8], Vec<TcpOption<'a>>, u32> {
     do_parse!(
+        &bs[0..len],
         options: many_till!(
-            alt!(
-                do_parse!(
-                    _a: char!(0x01 as char) >>
-                    (TcpOption::NoOperation)
-                ) |
-                do_parse!(
-                    _a: char!(0x02 as char) >>
-                    _a: char!(0x04 as char) >>
-                    seg_size: be_u16 >>
-                    (TcpOption::MaximumSegmentSize(seg_size))
-                ) |
-                do_parse!(
-                    _a: char!(0x03 as char) >>
-                    _a: char!(0x03 as char) >>
-                    shift: be_u8 >>
-                    (TcpOption::WindowScale(shift))
-                ) |
-                do_parse!(
-                    _a: char!(0x08 as char) >>
-                    _a: char!(0x0a as char) >>
-                    ts_val: be_u32 >>
-                    ts_ecr: be_u32 >>
-                    (TcpOption::Timestamps(ts_val, ts_ecr))
-                ) |
-                do_parse!(
-                    kind: be_u8 >>
-                    len: be_u8 >>
-                    data: take!(len - 2) >>
-                    (TcpOption::Other(kind, len, data))
-                )
-            ),
-            do_parse!(
-                _a: char!(0x00 as char) >>
-                (TcpOption::EndOfOptionList)
-            )
+            call!(known_options),
+            call!(end_of_options)
         ) >>
         ({
             let (mut options, end) = options;
             options.push(end);
+
             options
+                .into_iter()
+                .filter(|o| match o {
+                    &TcpOption::DummyOption => false,
+                    _ => true,
+                }).collect()
         })
     )
-);
+}
 
 #[derive(Clone, Copy, Debug)]
 pub enum TcpOption<'a> {
+    DummyOption,
     EndOfOptionList,
     NoOperation,
     MaximumSegmentSize(u16),

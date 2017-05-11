@@ -3,14 +3,15 @@ use nom::{be_u8, be_u16, IResult};
 #[derive(Clone, Debug)]
 pub struct Packet<'a> {
     pub header: Header<'a>,
-    pub payload: &'a [u8],
+    pub body: &'a [u8],
 }
 
 pub fn parse_ipv4_packet<'a>(bs: &'a [u8]) -> IResult<&'a [u8], Packet<'a>, u32> {
     match parse_ipv4_header(bs) {
         IResult::Done(_, header) => {
+            println!("{:?}", &header);
             IResult::Done(&bs[header.total_len as usize..], Packet {
-                payload: &bs[4*header.len as usize..],
+                body: &bs[4*header.len as usize..],
                 header: header,
             })
         },
@@ -48,8 +49,14 @@ pub struct Flags {
 pub enum PacketOption<'a> {
     EndOfOption,
     NoOperation,
-    Other(u8, u8, &'a [u8])
+    Other(u8, u8, &'a [u8]),
+    Dummy
 }
+
+named!(test_eof<PacketOption>,
+    map!(eof!(), |_| PacketOption::Dummy)
+);
+
 
 named!(parse_options<Vec<PacketOption> >,
    do_parse!(
@@ -64,17 +71,27 @@ named!(parse_options<Vec<PacketOption> >,
                     length: be_u8 >>
                     data: take!(length - 2) >>
                     (PacketOption::Other(class, length, data))
-                )
+                ) |
+                call!(test_eof)
             ),
-            do_parse!(
-                _a: char!(0x00 as char) >>
-                (PacketOption::EndOfOption)
+            alt!(
+                do_parse!(
+                    _a: char!(0x00 as char) >>
+                    (PacketOption::EndOfOption)
+                ) |
+                call!(test_eof)
             )
         ) >> 
         ({
             let (mut options, last) = options;
             options.push(last);
             options
+                .into_iter()
+                .filter(|o| match o {
+                    &PacketOption::Dummy => false,
+                    _ => true,
+                })
+                .collect()
         })
     )
 );
