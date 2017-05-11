@@ -1,36 +1,94 @@
 use nom::{be_u8, be_u16, be_u32, IResult};
 
-pub struct RawTcpHeader {
+// https://tools.ietf.org/html/rfc793
+#[derive(Clone, Debug)]
+pub struct TcpPacket<'a> {
     pub src: u16,
     pub dst: u16,
     pub seq: u32,
     pub ack: u32,
-    pub bits: u16,
+    pub flags: TcpFlags,
     pub window_sz: u16,
     pub checksum: u16,
+    pub urgent: u16,
+    pub options: Vec<TcpOption<'a>>,
+    pub body: &'a [u8],
 }
 
-named!(parse_raw_header<RawTcpHeader>,
+struct Bits {
+    pub offset: u8,
+    pub ns: u8,
+    pub cwr: u8,
+    pub ece: u8,
+    pub urg: u8,
+    pub ack: u8,
+    pub psh: u8,
+    pub rst: u8,
+    pub syn: u8,
+    pub fin: u8,
+}
+
+pub fn parse_tcp_packet<'a>(bs: &'a [u8]) -> IResult<&'a [u8], TcpPacket<'a>, u32> {
     do_parse!(
+        bs,
         src: be_u16 >>
         dst: be_u16 >>
         seq: be_u32 >>
         ack: be_u32 >>
-        bits: be_u16 >>
+        bits: bits!(
+            do_parse!(
+                offset: take_bits!(u8, 4) >>
+                _reserved: tag_bits!(u8, 3, 0) >>
+                ns: take_bits!(u8, 1) >>
+                cwr: take_bits!(u8, 1) >>
+                ece: take_bits!(u8, 1) >>
+                urg: take_bits!(u8, 1) >>
+                ack: take_bits!(u8, 1) >>
+                psh: take_bits!(u8, 1) >>
+                rst: take_bits!(u8, 1) >>
+                syn: take_bits!(u8, 1) >>
+                fin: take_bits!(u8, 1) >>
+                (Bits {
+                    offset: offset,
+                    ns: ns,
+                    cwr: cwr,
+                    ece: ece,
+                    urg: urg,
+                    ack: ack,
+                    psh: psh,
+                    rst: rst,
+                    syn: syn,
+                    fin: fin,
+                })
+            )
+        ) >>
         sz: be_u16 >>
         sum: be_u16 >>
         urgent: be_u16 >>
-        (RawTcpHeader {
-            src: src,
-            dst: dst,
-            seq: seq,
-            ack: ack,
-            bits: bits,
-            window_sz: sz,
-            checksum: sum,
+        options: cond!(bits.offset > 5, parse_options) >>
+        ({
+            let mut header = TcpPacket {
+                src: src,
+                dst: dst,
+                seq: seq,
+                ack: ack,
+                body: &bs[4*bits.offset as usize..],
+                flags: TcpFlags::from_bits(bits),
+                window_sz: sz,
+                checksum: sum,
+                urgent: urgent,
+                options: vec![],
+            };
+
+            match options {
+                Some(options) => header.options = options,
+                None => {},
+            }
+
+            header
         })
     )
-);
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct TcpFlags {
@@ -47,69 +105,23 @@ pub struct TcpFlags {
 }
 
 impl TcpFlags {
-    fn from_half_word(w: u16) -> TcpFlags {
+    fn from_bits(bits: Bits) -> TcpFlags {
         TcpFlags {
-            offset: ((w >> 12) & 15) as u8,
-            fin: ((w >> 0) & 1) == 1,
-            syn: ((w >> 1) & 1) == 1,
-            rst: ((w >> 2) & 1) == 1,
-            psh: ((w >> 3) & 1) == 1,
-            ack: ((w >> 4) & 1) == 1,
-            urg: ((w >> 5) & 1) == 1,
-            ece: ((w >> 6) & 1) == 1,
-            cwr: ((w >> 7) & 1) == 1,
-            ns: ((w >> 8) & 1) == 1,
+            offset: bits.offset,
+            fin: bits.fin == 1,
+            syn: bits.syn == 1,
+            rst: bits.rst == 1,
+            psh: bits.psh == 1,
+            ack: bits.ack == 1,
+            urg: bits.urg == 1,
+            ece: bits.ece == 1,
+            cwr: bits.cwr == 1,
+            ns: bits.ns == 1,
         }
     }
 }
 
 
-// https://tools.ietf.org/html/rfc793
-#[derive(Clone, Debug)]
-pub struct TcpPacket<'a> {
-    pub src: u16,
-    pub dst: u16,
-    pub seq: u32,
-    pub ack: u32,
-    pub flags: TcpFlags,
-    pub window_sz: u16,
-    pub checksum: u16,
-    pub options: Vec<TcpOption<'a>>,
-    pub body: &'a [u8],
-}
-
-pub fn parse_tcp_packet<'a>(bytestr: &'a [u8]) -> IResult<&'a [u8], TcpPacket<'a>, u32> {
-    match parse_raw_header(bytestr) {
-        IResult::Done(left, raw_header) => {
-            let flags =TcpFlags::from_half_word(raw_header.bits);
-            let mut packet = TcpPacket {
-                src: raw_header.src,
-                dst: raw_header.dst,
-                seq: raw_header.seq,
-                ack: raw_header.ack,
-                flags: flags,
-                window_sz: raw_header.window_sz,
-                checksum: raw_header.checksum,
-                options: vec![],
-                body: &bytestr[4*flags.offset as usize..],
-            };
-
-            if flags.offset > 5 {
-                match parse_options(left) {
-                    IResult::Done(_, options) => {
-                        packet.options = options;
-                    },
-                    IResult::Incomplete(a) => return IResult::Incomplete(a),
-                    IResult::Error(e) => return IResult::Error(e),
-                }
-            }
-
-            IResult::Done(left, packet)
-        },
-        IResult::Incomplete(a) => IResult::Incomplete(a),
-        IResult::Error(e) => IResult::Error(e),
-    }
-}
 
 named!(parse_options<Vec<TcpOption> >,
     do_parse!(
