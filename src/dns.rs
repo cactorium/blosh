@@ -118,11 +118,21 @@ pub fn parse_dns_message_full<'a>(bytestr: &'a [u8]) -> IResult<&'a [u8], Messag
 
 pub struct RawHeader {
     id: u16,
-    fields: u16,
+    fields: Bits,
     qdcount: u16,
     ancount: u16,
     nscount: u16,
     arcount: u16,
+}
+
+struct Bits {
+    qr: u8,
+    opcode: u8,
+    aa: u8,
+    tc: u8,
+    rd: u8,
+    ra: u8,
+    rcode: u8,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -134,7 +144,6 @@ pub struct Header {
     pub tc: bool,
     pub rd: bool,
     pub ra: bool,
-    pub z: Z,
     pub rcode: Rcode,
     pub qdcount: u16,
     pub ancount: u16,
@@ -144,32 +153,18 @@ pub struct Header {
 
 impl Header {
     pub fn from(raw: RawHeader) -> Option<Header> {
-        /*
-        let qr = QR::from(raw.fields & 1);
-        let opcode = Opcode::from((raw.fields >> 1) & 15);
-        let aa = (raw.fields >> 5) & 1 == 1;
-        let tc = (raw.fields >> 6) & 1 == 1;
-        let rd = (raw.fields >> 7) & 1 == 1;
-        let ra = (raw.fields >> 8) & 1 == 1;
-        let z = Z::from((raw.fields >> 9) & 7);
-        let rcode = Rcode::from((raw.fields >> 12) & 15);
-        */
-        let qr = QR::from((raw.fields >> 15) & 1);
-        let opcode = Opcode::from((raw.fields >> 11) & 15);
-        let aa = (raw.fields >> 10) & 1 == 1;
-        let tc = (raw.fields >> 9) & 1 == 1;
-        let rd = (raw.fields >> 8) & 1 == 1;
-        let ra = (raw.fields >> 7) & 1 == 1;
-        let z = Z::from((raw.fields >> 4) & 7);
-        let rcode = Rcode::from((raw.fields >> 0) & 15);
+        let qr = QR::from(raw.fields.qr);
+        let opcode = Opcode::from(raw.fields.opcode);
+        let aa = raw.fields.aa & 1 == 1;
+        let tc = raw.fields.tc & 1 == 1;
+        let rd = raw.fields.rd & 1 == 1;
+        let ra = raw.fields.ra & 1 == 1;
+        let rcode = Rcode::from(raw.fields.rcode);
 
         if !qr.is_some() {
             return None;
         }
         if !opcode.is_some() {
-            return None;
-        }
-        if !z.is_some() {
             return None;
         }
         if !rcode.is_some() {
@@ -184,7 +179,6 @@ impl Header {
             tc: tc,
             rd: rd,
             ra: ra,
-            z: z.unwrap(),
             rcode: rcode.unwrap(),
             qdcount: raw.qdcount,
             ancount: raw.ancount,
@@ -194,11 +188,32 @@ impl Header {
     }
 }
 
+
 named!(pub parse_dns_header< Header >,
     map_opt!(
         do_parse!(
             id: be_u16 >>
-            fields: be_u16 >>
+            fields: bits!(
+                do_parse!(
+                    qr: take_bits!(u8, 1) >>
+                    opcode: take_bits!(u8, 4) >>
+                    aa: take_bits!(u8, 1) >>
+                    tc: take_bits!(u8, 1) >>
+                    rd: take_bits!(u8, 1) >>
+                    ra: take_bits!(u8, 1) >>
+                    _z: tag_bits!(u8, 3, 0) >>
+                    rcode: take_bits!(u8, 4) >>
+                    (Bits {
+                        qr: qr,
+                        opcode: opcode,
+                        aa: aa,
+                        tc: tc,
+                        rd: rd,
+                        ra: ra,
+                        rcode: rcode,
+                    })
+                )
+            ) >>
             qdcount: be_u16 >>
             ancount: be_u16 >>
             nscount: be_u16 >>
@@ -223,7 +238,7 @@ pub enum QR {
 }
 
 impl QR {
-    pub fn from(i: u16) -> Option<QR> {
+    pub fn from(i: u8) -> Option<QR> {
         match i {
             0 => Some(QR::Query),
             1 => Some(QR::Response),
@@ -241,7 +256,7 @@ pub enum Opcode {
 }
 
 impl Opcode {
-    fn from(i: u16) -> Option<Opcode> {
+    fn from(i: u8) -> Option<Opcode> {
         match i {
             0 => Some(Opcode::Query),
             1 => Some(Opcode::InverseQuery),
@@ -258,18 +273,6 @@ impl Opcode {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Z;
-
-impl Z {
-    fn from(i: u16) -> Option<Z> {
-        match i {
-            0 => Some(Z),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Rcode {
     NoError,
     FormatError,
@@ -280,7 +283,7 @@ pub enum Rcode {
 }
 
 impl Rcode {
-    fn from(i: u16) -> Option<Rcode> {
+    fn from(i: u8) -> Option<Rcode> {
         match i {
             0 => Some(Rcode::NoError),
             1 => Some(Rcode::FormatError),
@@ -806,7 +809,6 @@ mod tests {
                         tc: false,
                         rd: true,
                         ra: false,
-                        z: Z,
                         rcode: Rcode::NoError,
                         qdcount: 1,
                         ancount: 0,
@@ -847,7 +849,7 @@ mod tests {
             0x00, 0x04, 0x42, 0xf9, 0x59, 0x68];
         // println!("{:?}", parse_dns_message(&resp));
 
-        println!("{:?}", parse_dns_message_full(&resp));
+        // println!("{:?}", parse_dns_message_full(&resp));
 
         assert_eq!(
             parse_dns_message_full(&resp),
@@ -862,7 +864,6 @@ mod tests {
                         tc: false,
                         rd: true,
                         ra: true,
-                        z: Z,
                         rcode: Rcode::NoError,
                         qdcount: 1,
                         ancount: 3,
@@ -908,7 +909,7 @@ mod tests {
                             typ: Type::A,
                             class: Class::IN,
                             ttl: 227,
-                            rdata: Rdata::A([99, 89, 249, 66])
+                            rdata: Rdata::A(&[66, 249, 89, 99])
                         },
                         ResourceRecord {
                             name: DomainName::Labels(vec![
@@ -920,7 +921,7 @@ mod tests {
                             typ: Type::A,
                             class: Class::IN,
                             ttl: 227,
-                            rdata: Rdata::A([104, 89, 249, 66])
+                            rdata: Rdata::A(&[66, 249, 89, 104])
                         }
                     ],
                     authorities: vec![],
