@@ -550,9 +550,9 @@ pub enum Rdata<'a> {
     Ptr(DomainName<'a>),
     Soa(Soa<'a>),
     Txt(Vec<CharacterString<'a>>),
-    A([u8; 4]),
+    A(&'a [u8]),
     Wks(Wks<'a>),
-    AAAA([u8; 16]),
+    AAAA(&'a [u8]),
     Unknown(&'a [u8]),
 }
 
@@ -561,7 +561,7 @@ impl <'a> Rdata<'a> {
         match typ {
             Type::A => {
                 if raw.len() >= 4 {
-                    Some(Rdata::A([raw[3], raw[2], raw[1], raw[0]]))
+                    Some(Rdata::A(&raw[0..4]))
                 } else {
                     None
                 }
@@ -655,12 +655,13 @@ impl <'a> Rdata<'a> {
             },
             Type::AAAA => {
                 if raw.len() >= 16 {
-                    Some(Rdata::AAAA([
+                    Some(Rdata::AAAA(&raw[0..16]))
+                    /* Some(Rdata::AAAA([
                         raw[15], raw[14], raw[13], raw[12],
                         raw[11], raw[10], raw[9], raw[8],
                         raw[7], raw[6], raw[5], raw[4],
                         raw[3], raw[2], raw[1], raw[0],
-                    ]))
+                    ])) */
                 } else {
                     None
                 }
