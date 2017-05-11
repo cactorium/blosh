@@ -1,4 +1,4 @@
-use nom::{be_u8, le_u16, be_u16, be_u32, rest, IResult};
+use nom::{be_u8, be_u16, be_u32, rest, IResult};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Message<'a> {
@@ -29,77 +29,88 @@ named!(pub parse_dns_message<Message>,
 /// Convert domain name pointers to byte slices
 pub fn parse_dns_message_full<'a>(bytestr: &'a [u8]) -> IResult<&'a [u8], Message<'a>, u32> {
     use std::collections::HashMap;
+
+    fn domain_deref<'a>(domain: &DomainName<'a>, dict: &mut HashMap<u16, DomainName<'a>>, bytestr: &'a [u8]) -> Option<DomainName<'a>> {
+        match domain {
+            &DomainName::Pointer(ref off) => {
+                if dict.contains_key(off) {
+                    Some(dict[off].clone())
+                } else {
+                    let new_domain_ref = domain_name(&bytestr[*off as usize..]);
+                    match new_domain_ref {
+                        IResult::Done(_, domain) => {
+                            dict.insert(*off, domain.clone());
+                            Some(domain)
+                        },
+                        _ => None,
+                    }
+                }
+            },
+            &DomainName::LabelWithPointer(ref list, ref off) => {
+                let mut list = list.clone();
+                let to_add = if dict.contains_key(off) {
+                    dict[off].clone()
+                } else {
+                    let new_domain_ref = domain_name(&bytestr[*off as usize..]);
+                    match new_domain_ref {
+                        IResult::Done(_, domain_name) => {
+                            dict.insert(*off, domain_name.clone());
+                            domain_name
+                        },
+                        _ => { return None; },
+                    }
+                };
+                if let DomainName::Labels(ref to_add) = to_add {
+                    list.extend(to_add);
+                    Some(DomainName::Labels(list))
+                } else {
+                    None
+                }
+            },
+            _ => unreachable!("nonpointer name!"),
+        }
+    }
+
+    fn fix_record<'a>(record: &mut ResourceRecord<'a>, dict: &mut HashMap<u16, DomainName<'a>>,
+                      bytestr: &'a [u8]) {
+        let change_name = match &record.name {
+            &DomainName::Pointer(_) | &DomainName::LabelWithPointer(_, _) => true,
+            _ => false,
+        };
+        if change_name {
+            match domain_deref(&record.name, dict, bytestr) {
+                Some(domain) => record.name = domain,
+                _ => {},
+            }
+        }
+
+        // TODO: check the rdata field to see if it's a domain name
+    }
+
+
     parse_dns_message(bytestr)
         .map(|mut msg| {
             let mut parsed_pointers: HashMap<u16, DomainName<'a>> = HashMap::new();
-            let domain_deref = |domain: &DomainName<'a>, dict: &mut HashMap<u16, DomainName<'a>>| {
-                match domain {
-                    &DomainName::Pointer(ref off) => {
-                        if dict.contains_key(off) {
-                            Ok(dict[off].clone())
-                        } else {
-                            let new_domain_ref = domain_name(&bytestr[*off as usize..]);
-                            match new_domain_ref {
-                                IResult::Done(_, domain) => {
-                                    dict.insert(*off, domain.clone());
-                                    Ok(domain)
-                                },
-                                x => Err(x),
-                            }
-                        }
-                    },
-                    &DomainName::LabelWithPointer(ref list, ref off) => {
-                        let mut list = list.clone();
-                        let to_add = if dict.contains_key(off) {
-                            dict[off].clone()
-                        } else {
-                            let new_domain_ref = domain_name(&bytestr[*off as usize..]);
-                            match new_domain_ref {
-                                IResult::Done(_, domain_name) => {
-                                    dict.insert(*off, domain_name.clone());
-                                    domain_name
-                                },
-                                x => { return Err(x); },
-                            }
-                        };
-                        if let DomainName::Labels(ref to_add) = to_add {
-                            list.extend(to_add);
-                            Ok(DomainName::Labels(list))
-                        } else {
-                            panic!("TODO: fix this panic");
-                            // TODO: add error here instead of panicking
-                        }
-                    },
-                    _ => unreachable!("nonpointer name!"),
-                }
-            };
-
-            let mut fix_record = |record: &mut ResourceRecord<'a>| {
-                let change_name = match &record.name {
+            for query in msg.questions.iter_mut() {
+                let change_name = match &query.qname {
                     &DomainName::Pointer(_) | &DomainName::LabelWithPointer(_, _) => true,
                     _ => false,
                 };
                 if change_name {
-                    match domain_deref(&record.name, &mut parsed_pointers) {
-                        Ok(domain) => record.name = domain,
+                    match domain_deref(&query.qname, &mut parsed_pointers, bytestr) {
+                        Some(domain) => query.qname = domain,
                         _ => {},
                     }
                 }
-
-                // TODO: check the rdata field to see if it's a domain name
-            };
-
-            for query in msg.questions.iter_mut() {
-                // TODO
             }
             for answer in msg.answers.iter_mut() {
-                fix_record(answer);
+                fix_record(answer, &mut parsed_pointers, bytestr);
             }
             for authority in msg.authorities.iter_mut() {
-                fix_record(authority);
+                fix_record(authority, &mut parsed_pointers, bytestr);
             }
             for record in msg.additional.iter_mut() {
-                fix_record(record);
+                fix_record(record, &mut parsed_pointers, bytestr);
             }
             msg
         })
@@ -459,6 +470,7 @@ pub enum Type {
     Minfo,
     MX,
     Txt,
+    AAAA,
 }
 
 impl Type {
@@ -480,6 +492,7 @@ impl Type {
             14 => Some(Type::Minfo),
             15 => Some(Type::MX),
             16 => Some(Type::Txt),
+            28 => Some(Type::AAAA),
             _ => None,
         }
     }
@@ -539,6 +552,7 @@ pub enum Rdata<'a> {
     Txt(Vec<CharacterString<'a>>),
     A([u8; 4]),
     Wks(Wks<'a>),
+    AAAA([u8; 16]),
     Unknown(&'a [u8]),
 }
 
@@ -638,6 +652,18 @@ impl <'a> Rdata<'a> {
                     .to_result()
                     .ok()
                     .map(Rdata::Txt)
+            },
+            Type::AAAA => {
+                if raw.len() >= 16 {
+                    Some(Rdata::AAAA([
+                        raw[15], raw[14], raw[13], raw[12],
+                        raw[11], raw[10], raw[9], raw[8],
+                        raw[7], raw[6], raw[5], raw[4],
+                        raw[3], raw[2], raw[1], raw[0],
+                    ]))
+                } else {
+                    None
+                }
             },
         }
     }
