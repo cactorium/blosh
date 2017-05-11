@@ -1,4 +1,4 @@
-use nom::{be_u8, be_u16, be_u32, rest};
+use nom::{be_u8, le_u16, be_u16, be_u32, rest, IResult};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Message<'a> {
@@ -25,6 +25,85 @@ named!(pub parse_dns_message<Message>,
         })
     )
 );
+
+/// Convert domain name pointers to byte slices
+pub fn parse_dns_message_full<'a>(bytestr: &'a [u8]) -> IResult<&'a [u8], Message<'a>, u32> {
+    use std::collections::HashMap;
+    parse_dns_message(bytestr)
+        .map(|mut msg| {
+            let mut parsed_pointers: HashMap<u16, DomainName<'a>> = HashMap::new();
+            let domain_deref = |domain: &DomainName<'a>, dict: &mut HashMap<u16, DomainName<'a>>| {
+                match domain {
+                    &DomainName::Pointer(ref off) => {
+                        if dict.contains_key(off) {
+                            Ok(dict[off].clone())
+                        } else {
+                            let new_domain_ref = domain_name(&bytestr[*off as usize..]);
+                            match new_domain_ref {
+                                IResult::Done(_, domain) => {
+                                    dict.insert(*off, domain.clone());
+                                    Ok(domain)
+                                },
+                                x => Err(x),
+                            }
+                        }
+                    },
+                    &DomainName::LabelWithPointer(ref list, ref off) => {
+                        let mut list = list.clone();
+                        let to_add = if dict.contains_key(off) {
+                            dict[off].clone()
+                        } else {
+                            let new_domain_ref = domain_name(&bytestr[*off as usize..]);
+                            match new_domain_ref {
+                                IResult::Done(_, domain_name) => {
+                                    dict.insert(*off, domain_name.clone());
+                                    domain_name
+                                },
+                                x => { return Err(x); },
+                            }
+                        };
+                        if let DomainName::Labels(ref to_add) = to_add {
+                            list.extend(to_add);
+                            Ok(DomainName::Labels(list))
+                        } else {
+                            panic!("TODO: fix this panic");
+                            // TODO: add error here instead of panicking
+                        }
+                    },
+                    _ => unreachable!("nonpointer name!"),
+                }
+            };
+
+            let mut fix_record = |record: &mut ResourceRecord<'a>| {
+                let change_name = match &record.name {
+                    &DomainName::Pointer(_) | &DomainName::LabelWithPointer(_, _) => true,
+                    _ => false,
+                };
+                if change_name {
+                    match domain_deref(&record.name, &mut parsed_pointers) {
+                        Ok(domain) => record.name = domain,
+                        _ => {},
+                    }
+                }
+
+                // TODO: check the rdata field to see if it's a domain name
+            };
+
+            for query in msg.questions.iter_mut() {
+                // TODO
+            }
+            for answer in msg.answers.iter_mut() {
+                fix_record(answer);
+            }
+            for authority in msg.authorities.iter_mut() {
+                fix_record(authority);
+            }
+            for record in msg.additional.iter_mut() {
+                fix_record(record);
+            }
+            msg
+        })
+}
 
 pub struct RawHeader {
     id: u16,
@@ -54,6 +133,7 @@ pub struct Header {
 
 impl Header {
     pub fn from(raw: RawHeader) -> Option<Header> {
+        /*
         let qr = QR::from(raw.fields & 1);
         let opcode = Opcode::from((raw.fields >> 1) & 15);
         let aa = (raw.fields >> 5) & 1 == 1;
@@ -62,6 +142,15 @@ impl Header {
         let ra = (raw.fields >> 8) & 1 == 1;
         let z = Z::from((raw.fields >> 9) & 7);
         let rcode = Rcode::from((raw.fields >> 12) & 15);
+        */
+        let qr = QR::from((raw.fields >> 15) & 1);
+        let opcode = Opcode::from((raw.fields >> 11) & 15);
+        let aa = (raw.fields >> 10) & 1 == 1;
+        let tc = (raw.fields >> 9) & 1 == 1;
+        let rd = (raw.fields >> 8) & 1 == 1;
+        let ra = (raw.fields >> 7) & 1 == 1;
+        let z = Z::from((raw.fields >> 4) & 7);
+        let rcode = Rcode::from((raw.fields >> 0) & 15);
 
         if !qr.is_some() {
             return None;
@@ -688,8 +777,8 @@ mod tests {
                         opcode: Opcode::Query,
                         aa: false,
                         tc: false,
-                        rd: false,
-                        ra: true,
+                        rd: true,
+                        ra: false,
                         z: Z,
                         rcode: Rcode::NoError,
                         qdcount: 1,
@@ -711,6 +800,106 @@ mod tests {
                     authorities: vec![],
                     additional: vec![]
                 })
+        );
+    }
+
+    #[test]
+    fn test_response() {
+        let resp = [
+            0x24, 0x1a, 0x81, 0x80, 0x00, 0x01, 0x00, 0x03,
+            0x00, 0x00, 0x00, 0x00, 0x03, 0x77, 0x77, 0x77,
+            0x06, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x03,
+            0x63, 0x6f, 0x6d, 0x00, 0x00, 0x01, 0x00, 0x01,
+            0xc0, 0x0c, 0x00, 0x05, 0x00, 0x01, 0x00, 0x05,
+            0x28, 0x39, 0x00, 0x12, 0x03, 0x77, 0x77, 0x77,
+            0x01, 0x6c, 0x06, 0x67, 0x6f, 0x6f, 0x67, 0x6c,
+            0x65, 0x03, 0x63, 0x6f, 0x6d, 0x00, 0xc0, 0x2c,
+            0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0xe3,
+            0x00, 0x04, 0x42, 0xf9, 0x59, 0x63, 0xc0, 0x2c,
+            0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0xe3,
+            0x00, 0x04, 0x42, 0xf9, 0x59, 0x68];
+        // println!("{:?}", parse_dns_message(&resp));
+
+        println!("{:?}", parse_dns_message_full(&resp));
+
+        assert_eq!(
+            parse_dns_message_full(&resp),
+            IResult::Done(
+                &b""[..],
+                Message {
+                    header: Header {
+                        id: 9242,
+                        qr: QR::Response,
+                        opcode: Opcode::Query,
+                        aa: false,
+                        tc: false,
+                        rd: true,
+                        ra: true,
+                        z: Z,
+                        rcode: Rcode::NoError,
+                        qdcount: 1,
+                        ancount: 3,
+                        nscount: 0,
+                        arcount: 0
+                    },
+                    questions: vec![
+                        Query {
+                            qname: DomainName::Labels(vec![
+                                          &[119, 119, 119],
+                                          &[103, 111, 111, 103, 108, 101],
+                                          &[99, 111, 109]
+                            ]),
+                            qtype: Qtype::Type(Type::A),
+                            qclass: Qclass::Class(Class::IN)
+                        }
+                    ],
+                    answers: vec![
+                        ResourceRecord {
+                            name: DomainName::Labels(vec![
+                                         &[119, 119, 119],
+                                         &[103, 111, 111, 103, 108, 101],
+                                         &[99, 111, 109]
+                            ]),
+                            typ: Type::Cname,
+                            class: Class::IN,
+                            ttl: 337977,
+                            rdata: Rdata::Cname(
+                                DomainName::Labels(vec![
+                                       &[119, 119, 119],
+                                       &[108],
+                                       &[103, 111, 111, 103, 108, 101],
+                                       &[99, 111, 109]
+                                ]))
+                        },
+                        ResourceRecord {
+                            name: DomainName::Labels(vec![
+                                         &[119, 119, 119],
+                                         &[108],
+                                         &[103, 111, 111, 103, 108, 101],
+                                         &[99, 111, 109]
+                            ]),
+                            typ: Type::A,
+                            class: Class::IN,
+                            ttl: 227,
+                            rdata: Rdata::A([99, 89, 249, 66])
+                        },
+                        ResourceRecord {
+                            name: DomainName::Labels(vec![
+                                         &[119, 119, 119],
+                                         &[108],
+                                         &[103, 111, 111, 103, 108, 101],
+                                         &[99, 111, 109]
+                            ]),
+                            typ: Type::A,
+                            class: Class::IN,
+                            ttl: 227,
+                            rdata: Rdata::A([104, 89, 249, 66])
+                        }
+                    ],
+                    authorities: vec![],
+                    additional: vec![]
+                }
+            )
         );
     }
 }
