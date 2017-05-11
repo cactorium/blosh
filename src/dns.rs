@@ -1,4 +1,4 @@
-use nom::{be_u8, be_u16, be_u32};
+use nom::{be_u8, be_u16, be_u32, rest};
 
 pub struct Message<'a> {
     pub header: Header,
@@ -114,6 +114,7 @@ named!(pub parse_dns_header< Header >,
     )
 );
 
+#[derive(Clone, Copy, Debug)]
 pub enum QR {
     Query,
     Response,
@@ -129,6 +130,7 @@ impl QR {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
 pub enum Opcode {
     Query,
     InverseQuery,
@@ -164,6 +166,7 @@ impl Z {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
 pub enum Rcode {
     NoError,
     FormatError,
@@ -211,6 +214,7 @@ named!(query<Query>,
 );
 
 pub type Qname<'a> = DomainName<'a>;
+
 pub enum DomainName<'a> {
     Labels(Vec<Label<'a>>),
     Pointer(u16),
@@ -256,6 +260,7 @@ named!(label,
     )
 );
 
+#[derive(Clone, Copy, Debug)]
 pub enum Qtype {
     Type(Type),
     Axfr,
@@ -287,6 +292,7 @@ named!(qtype<Qtype>,
     )
 );
 
+#[derive(Clone, Copy, Debug)]
 pub enum Qclass {
     Class(Class),
     Wildcard,
@@ -319,8 +325,9 @@ pub struct ResourceRecord<'a> {
     pub typ: Type,
     pub class: Class,
     pub ttl: u32,
-    pub rdata: &'a [u8],
+    pub rdata: Rdata<'a>,
 }
+
 named!(resource_record<ResourceRecord>,
     do_parse!(
         name: domain_name >>
@@ -328,7 +335,7 @@ named!(resource_record<ResourceRecord>,
         class: parse_class >>
         ttl: be_u32 >>
         rdlen: be_u16 >>
-        rdata: take!(rdlen) >>
+        rdata: map_opt!(take!(rdlen), |data| Rdata::from(typ, data)) >>
         (ResourceRecord {
             name: name,
             typ: typ,
@@ -339,6 +346,7 @@ named!(resource_record<ResourceRecord>,
     )
 );
 
+#[derive(Clone, Copy, Debug)]
 pub enum Type {
     A,
     NS,
@@ -390,6 +398,7 @@ named!(parse_type<Type>,
 );
 
 
+#[derive(Clone, Copy, Debug)]
 pub enum Class {
     IN,
     CS,
@@ -416,3 +425,230 @@ named!(parse_class<Class>,
     )
 );
 
+
+pub enum Rdata<'a> {
+    Cname(DomainName<'a>),
+    Hinfo(Hinfo<'a>),
+    MB(DomainName<'a>),
+    MD(DomainName<'a>),
+    MF(DomainName<'a>),
+    MG(DomainName<'a>),
+    Minfo(Minfo<'a>),
+    MR(DomainName<'a>),
+    MX(MX<'a>),
+    Null(&'a [u8]),
+    NS(DomainName<'a>),
+    Ptr(DomainName<'a>),
+    Soa(Soa<'a>),
+    Txt(Vec<CharacterString<'a>>),
+    A([u8; 4]),
+    Wks(Wks<'a>),
+    Unknown(&'a [u8]),
+}
+
+impl <'a> Rdata<'a> {
+    pub fn from(typ: Type, raw: &'a [u8]) -> Option<Rdata<'a>> {
+        match typ {
+            Type::A => {
+                if raw.len() >= 4 {
+                    Some(Rdata::A([raw[3], raw[2], raw[1], raw[0]]))
+                } else {
+                    None
+                }
+            },
+            Type::NS => {
+                domain_name(raw)
+                    .to_result()
+                    .ok()
+                    .map(Rdata::NS)
+            },
+            Type::MD => {
+                domain_name(raw)
+                    .to_result()
+                    .ok()
+                    .map(Rdata::MD)
+            },
+            Type::MF => {
+                domain_name(raw)
+                    .to_result()
+                    .ok()
+                    .map(Rdata::MF)
+            },
+            Type::Cname => {
+                domain_name(raw)
+                    .to_result()
+                    .ok()
+                    .map(Rdata::Cname)
+            },
+            Type::SOA => {
+                parse_soa(raw)
+                    .to_result()
+                    .ok()
+                    .map(Rdata::Soa)
+            },
+            Type::MB => {
+                domain_name(raw)
+                    .to_result()
+                    .ok()
+                    .map(Rdata::MB)
+            },
+            Type::MG => {
+                domain_name(raw)
+                    .to_result()
+                    .ok()
+                    .map(Rdata::MG)
+            },
+            Type::MR => {
+                domain_name(raw)
+                    .to_result()
+                    .ok()
+                    .map(Rdata::MR)
+            },
+            Type::Null => {
+                Some(Rdata::Null(raw))
+            },
+            Type::WKS => {
+                parse_wks(raw)
+                    .to_result()
+                    .ok()
+                    .map(Rdata::Wks)
+            },
+            Type::Ptr => {
+                domain_name(raw)
+                    .to_result()
+                    .ok()
+                    .map(Rdata::Ptr)
+            },
+            Type::Hinfo => {
+                hinfo(raw)
+                    .to_result()
+                    .ok()
+                    .map(Rdata::Hinfo)
+            },
+            Type::Minfo => {
+                minfo(raw)
+                    .to_result()
+                    .ok()
+                    .map(Rdata::Minfo)
+            },
+            Type::MX => {
+                parse_mx(raw)
+                    .to_result()
+                    .ok()
+                    .map(Rdata::MX)
+            },
+            Type::Txt => {
+                parse_txt(raw)
+                    .to_result()
+                    .ok()
+                    .map(Rdata::Txt)
+            },
+        }
+    }
+}
+
+pub struct Hinfo<'a> {
+    pub cpu: CharacterString<'a>,
+    pub os: CharacterString<'a>,
+}
+named!(hinfo<Hinfo>,
+    do_parse!(
+        cpu: parse_char_string >>
+        os: parse_char_string >>
+        (Hinfo {
+            cpu: cpu,
+            os: os,
+        })
+    )
+);
+
+pub struct Minfo<'a> {
+    pub rmailbox: DomainName<'a>,
+    pub emailbox: DomainName<'a>,
+}
+named!(minfo<Minfo>,
+    do_parse!(
+        rbox: domain_name >>
+        ebox: domain_name >>
+        (Minfo {
+            rmailbox: rbox,
+            emailbox: ebox,
+        })
+    )
+);
+
+pub struct MX<'a> {
+    pub preference: u16,
+    pub exchange: DomainName<'a>,
+}
+named!(parse_mx<MX>,
+    do_parse!(
+        preference: be_u16 >>
+        exchange: domain_name >>
+        (MX {
+            preference: preference,
+            exchange: exchange,
+        })
+    )
+);
+
+pub struct Soa<'a> {
+    pub mname: DomainName<'a>,
+    pub rname: DomainName<'a>,
+    pub serial: u32,
+    pub refresh: u32,
+    pub retry: u32,
+    pub expire: u32,
+    pub minimum: u32,
+}
+named!(parse_soa<Soa>,
+    do_parse!(
+        mname: domain_name >>
+        rname: domain_name >>
+        serial: be_u32 >>
+        refresh: be_u32 >>
+        retry: be_u32 >>
+        expire: be_u32 >>
+        minimum: be_u32 >>
+        (Soa {
+            mname: mname,
+            rname: rname,
+            serial: serial,
+            refresh: refresh,
+            retry: retry,
+            expire: expire,
+            minimum: minimum,
+        })
+    )
+);
+
+pub struct CharacterString<'a>(&'a [u8]);
+named!(parse_char_string<CharacterString>,
+    do_parse!(
+        len: be_u8 >>
+        string: take!(len as usize) >>
+        (CharacterString(string))
+    )
+);
+
+named!(parse_txt< Vec<CharacterString> >,
+    many1!(parse_char_string)
+);
+
+pub struct Wks<'a> {
+    pub address: [u8; 4],
+    pub protocol: u8,
+    pub bitmap: &'a [u8],
+}
+named!(parse_wks<Wks>,
+    do_parse!(
+        address: take!(4) >>
+        protocol: be_u8 >>
+        bitmap: rest >>
+        (Wks {
+            address: [address[3], address[2], address[1], address[0]],
+            protocol: protocol,
+            bitmap: bitmap
+        })
+    )
+);
