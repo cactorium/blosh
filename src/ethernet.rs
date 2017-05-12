@@ -7,8 +7,6 @@ pub struct EthernetIIPacket<'a> {
     pub body: &'a [u8],
 }
 
-// NOTE: will break if the bytestring isn't long enough
-// TODO: fix that
 pub fn parse_eth2_packet<'a>(bs: &'a [u8]) -> IResult<&'a [u8], EthernetIIPacket<'a>, u32> {
     do_parse!(
         bs,

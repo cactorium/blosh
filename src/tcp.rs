@@ -67,12 +67,13 @@ pub fn parse_tcp_packet<'a>(bs: &'a [u8]) -> IResult<&'a [u8], TcpPacket<'a>, u3
         urgent: be_u16 >>
         options: cond!(bits.offset > 5, apply!(parse_options, (4*bits.offset-20) as usize)) >>
         ({
+            use std::cmp::min;
             let mut header = TcpPacket {
                 src: src,
                 dst: dst,
                 seq: seq,
                 ack: ack,
-                body: &bs[4*bits.offset as usize..],
+                body: &bs[min(4*bits.offset as usize, bs.len())..],
                 flags: TcpFlags::from_bits(bits),
                 window_sz: sz,
                 checksum: sum,
