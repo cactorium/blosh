@@ -3,6 +3,12 @@ use nom::{be_u8, be_u16, be_u32, IResult};
 // https://tools.ietf.org/html/rfc793
 #[derive(Clone, Debug)]
 pub struct TcpPacket<'a> {
+    pub header: TcpHeader<'a>,
+    pub body: &'a [u8],
+}
+
+#[derive(Clone, Debug)]
+pub struct TcpHeader<'a> {
     pub src: u16,
     pub dst: u16,
     pub seq: u32,
@@ -12,7 +18,6 @@ pub struct TcpPacket<'a> {
     pub checksum: u16,
     pub urgent: u16,
     pub options: Vec<TcpOption<'a>>,
-    pub body: &'a [u8],
 }
 
 struct Bits {
@@ -68,25 +73,27 @@ pub fn parse_tcp_packet<'a>(bs: &'a [u8]) -> IResult<&'a [u8], TcpPacket<'a>, u3
         options: cond!(bits.offset > 5, apply!(parse_options, (4*bits.offset-20) as usize)) >>
         ({
             use std::cmp::min;
-            let mut header = TcpPacket {
-                src: src,
-                dst: dst,
-                seq: seq,
-                ack: ack,
+            let mut packet = TcpPacket {
+                header: TcpHeader {
+                    src: src,
+                    dst: dst,
+                    seq: seq,
+                    ack: ack,
+                    flags: TcpFlags::from_bits(&bits),
+                    window_sz: sz,
+                    checksum: sum,
+                    urgent: urgent,
+                    options: vec![],
+                },
                 body: &bs[min(4*bits.offset as usize, bs.len())..],
-                flags: TcpFlags::from_bits(bits),
-                window_sz: sz,
-                checksum: sum,
-                urgent: urgent,
-                options: vec![],
             };
 
             match options {
-                Some(options) => header.options = options,
+                Some(options) => packet.header.options = options,
                 None => {},
             }
 
-            header
+            packet
         })
     )
 }
@@ -106,7 +113,7 @@ pub struct TcpFlags {
 }
 
 impl TcpFlags {
-    fn from_bits(bits: Bits) -> TcpFlags {
+    fn from_bits(bits: &Bits) -> TcpFlags {
         TcpFlags {
             offset: bits.offset,
             fin: bits.fin == 1,
