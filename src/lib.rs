@@ -22,6 +22,12 @@ pub enum IpPacket<'a> {
     V6(ipv6::Ipv6Packet<'a>),
 }
 
+#[derive(Clone, Debug)]
+pub enum IpHeader<'a> {
+    V4(&'a ipv4::Header<'a>),
+    V6(&'a ipv6::Ipv6Header<'a>),
+}
+
 pub fn parse_ip_packet<'a>(bs: &'a [u8]) -> Result<IpPacket<'a>, nom::IError> {
     alt!(
         bs,
@@ -29,7 +35,6 @@ pub fn parse_ip_packet<'a>(bs: &'a [u8]) -> Result<IpPacket<'a>, nom::IError> {
         map!(ipv6::parse_ipv6_packet, |p| IpPacket::V6(p))
     ).to_full_result()
 }
-
 
 
 #[derive(Clone, Debug)]
@@ -63,6 +68,13 @@ impl <'a> IpPacket<'a> {
                 _ => None,
             }
         })
+    }
+
+    pub fn header(&'a self) -> IpHeader<'a> {
+        match self {
+            &IpPacket::V4(ref ip4) => IpHeader::V4(&ip4.header),
+            &IpPacket::V6(ref ip6) => IpHeader::V6(&ip6.header),
+        }
     }
 }
 
