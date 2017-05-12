@@ -22,6 +22,16 @@ pub enum IpPacket<'a> {
     V6(ipv6::Ipv6Packet<'a>),
 }
 
+pub fn parse_ip_packet<'a>(bs: &'a [u8]) -> Result<IpPacket<'a>, nom::IError> {
+    alt!(
+        bs,
+        map!(ipv4::parse_ipv4_packet, |p| IpPacket::V4(p)) | 
+        map!(ipv6::parse_ipv6_packet, |p| IpPacket::V6(p))
+    ).to_full_result()
+}
+
+
+
 #[derive(Clone, Debug)]
 pub enum TransportLayerPacket<'a> {
     Tcp(tcp::TcpPacket<'a>),
@@ -54,14 +64,6 @@ impl <'a> IpPacket<'a> {
             }
         })
     }
-}
-
-pub fn parse_ip_packet<'a>(bs: &'a [u8]) -> Result<IpPacket<'a>, nom::IError> {
-    alt!(
-        bs,
-        map!(ipv4::parse_ipv4_packet, |p| IpPacket::V4(p)) | 
-        map!(ipv6::parse_ipv6_packet, |p| IpPacket::V6(p))
-    ).to_full_result()
 }
 
 #[cfg(test)]
