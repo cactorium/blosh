@@ -16,6 +16,54 @@ pub mod udp;
 pub mod dns;
 // pub mod smtp;
 
+#[derive(Clone, Debug)]
+pub enum IpPacket<'a> {
+    V4(ipv4::Ipv4Packet<'a>),
+    V6(ipv6::Ipv6Packet<'a>),
+}
+
+#[derive(Clone, Debug)]
+pub enum TransportLayerPacket<'a> {
+    Tcp(tcp::TcpPacket<'a>),
+    Udp(udp::UdpPacket<'a>),
+}
+
+impl <'a> IpPacket<'a> {
+    pub fn parse_inner(&self) -> Option<TransportLayerPacket<'a>> {
+        match self {
+            &IpPacket::V4(ref ip4) => Some((ip4.header.proto, ip4.body)),
+            &IpPacket::V6(ref ip6) => {
+                let proto = if ip6.extensions.len() == 0 {
+                    ip6.header.next_header
+                } else {
+                    ip6.extensions.last().unwrap().next_header
+                };
+                match proto {
+                    ipv6::Ipv6HeaderType::Ipv4(ref proto) => Some((*proto, ip6.body)),
+                    _ => None,
+                }
+            }
+        }
+        .and_then(|(proto, body)| {
+            match proto {
+                ipv4::Ipv4Protocol::Tcp => tcp::parse_tcp_packet(body)
+                    .to_full_result().ok().map(TransportLayerPacket::Tcp),
+                ipv4::Ipv4Protocol::Udp => udp::parse_udp_packet(body)
+                    .to_full_result().ok().map(TransportLayerPacket::Udp),
+                _ => None,
+            }
+        })
+    }
+}
+
+pub fn parse_ip_packet<'a>(bs: &'a [u8]) -> Result<IpPacket<'a>, nom::IError> {
+    alt!(
+        bs,
+        map!(ipv4::parse_ipv4_packet, |p| IpPacket::V4(p)) | 
+        map!(ipv6::parse_ipv6_packet, |p| IpPacket::V6(p))
+    ).to_full_result()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -35,6 +83,7 @@ mod tests {
             0x03, 0x07,
         ];
 
+        // TODO check more fields
         let (left, eth_packet) = ethernet::parse_eth2_packet(&packet).unwrap();
         println!("{:?}", &eth_packet);
         assert_eq!(left.len(), 0);

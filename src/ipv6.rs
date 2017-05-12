@@ -69,13 +69,13 @@ fn parse_extensions<'a>(mut bs: &'a [u8], mut header_type: Ipv6HeaderType) -> IR
 // TODO: wrap IP addresses in a struct to allow Deref to std::net::IpAddr 
 #[derive(Clone, Copy, Debug)]
 pub struct Ipv6Header<'a> {
-    traffic_class: u8,
-    flow_label: u32,
-    payload_length: u16,
-    next_header: Ipv6HeaderType,
-    hop_limit: u8,
-    src_ip: &'a [u8],
-    dst_ip: &'a [u8],
+    pub traffic_class: u8,
+    pub flow_label: u32,
+    pub payload_length: u16,
+    pub next_header: Ipv6HeaderType,
+    pub hop_limit: u8,
+    pub src_ip: &'a [u8],
+    pub dst_ip: &'a [u8],
 }
 
 struct Bitfields {

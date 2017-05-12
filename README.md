@@ -9,3 +9,7 @@ nom-based parsers for Internet packets
 - [x] DNS
 - [ ] ICMP
 - [ ] "cooked" Linux
+
+TODOS
+- Improve testing
+- Support more than passing around bytestrings
