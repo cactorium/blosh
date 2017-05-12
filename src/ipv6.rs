@@ -11,6 +11,35 @@ pub struct Ipv6Packet<'a> {
     pub body: &'a [u8],
 }
 
+struct PacketBody<'a> {
+    extensions: Vec<Ipv6Extension<'a>>,
+    body: &'a [u8],
+}
+
+// TODO: handle Jumbo Packets correctly
+named!(pub parse_ipv6_packet<Ipv6Packet>,
+    do_parse!(
+        header: parse_ipv6_header >>
+        packet_body: flat_map!(
+            take!(header.payload_length),
+            do_parse!(
+                extensions: call!(parse_extensions, header.next_header) >>
+                payload: rest >>
+                (PacketBody {
+                    body: payload,
+                    extensions: extensions,
+                })
+            )
+        ) >>
+        (Ipv6Packet {
+            header: header,
+            extensions: packet_body.extensions,
+            body: packet_body.body
+        })
+    )
+);
+
+
 fn has_next_header(ht: Ipv6HeaderType) -> bool {
     match ht {
         Ipv6HeaderType::Ipv4(_) => false,
@@ -37,19 +66,6 @@ fn parse_extensions<'a>(mut bs: &'a [u8], mut header_type: Ipv6HeaderType) -> IR
 }
 
 
-named!(pub parse_ipv6_packet<Ipv6Packet>,
-    do_parse!(
-        header: parse_ipv6_header >>
-        extensions: call!(parse_extensions, header.next_header) >>
-        body: rest >>
-        (Ipv6Packet {
-            header: header,
-            extensions: extensions,
-            body: body,
-        })
-    )
-);
-
 // TODO: wrap IP addresses in a struct to allow Deref to std::net::IpAddr 
 #[derive(Clone, Copy, Debug)]
 pub struct Ipv6Header<'a> {
@@ -67,7 +83,7 @@ struct Bitfields {
     flow_label: u32,
 }
 
-named!(parse_ipv6_header<Ipv6Header>,
+named!(pub parse_ipv6_header<Ipv6Header>,
     do_parse!(
         bitfields: bits!(
             do_parse!(
