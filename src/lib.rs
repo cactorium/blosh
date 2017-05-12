@@ -121,9 +121,14 @@ mod tests {
             0x00, 0x04, 0xcc, 0x47, 0xc8, 0x21,
         ];
 
-        let wrapped =  ipv6::parse_ipv6_packet(&packet);
-        println!("{:?}", &wrapped);
-        let (left, ip_packet) = wrapped.unwrap();
+        let (left, ip_packet) = ipv6::parse_ipv6_packet(&packet).unwrap();
+        println!("{:?}", &ip_packet);
         assert_eq!(left.len(), 0);
+        let (left, udp_packet) = udp::parse_udp_packet(&ip_packet.body).unwrap();
+        println!("{:?}", &udp_packet);
+        assert_eq!(left.len(), 0);
+        assert_eq!(udp_packet.header.src,53);
+        assert_eq!(udp_packet.header.dst, 2397);
+        assert_eq!(udp_packet.header.len, 304);
     }
 }

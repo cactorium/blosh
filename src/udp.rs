@@ -1,5 +1,6 @@
 use nom::{rest, be_u16};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UdpHeader {
     pub src: u16,
     pub dst: u16,
@@ -22,6 +23,7 @@ named!(pub parse_udp_header<UdpHeader>,
     )
 );
 
+#[derive(Clone, Debug)]
 pub struct UdpPacket<'a> {
     pub header: UdpHeader,
     pub body: &'a [u8],
