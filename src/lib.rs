@@ -95,7 +95,6 @@ mod tests {
         let (left, tcp_packet) = tcp::parse_tcp_packet(ipv4_packet.body).unwrap();
         println!("{:?}", &tcp_packet);
         assert_eq!(left.len(), 0);
-        assert!(false);
     }
 
 }

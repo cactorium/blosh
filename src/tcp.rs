@@ -1,4 +1,4 @@
-use nom::{be_u8, be_u16, be_u32, rest, IResult};
+use nom::{be_u8, be_u16, be_u32, IResult};
 
 // https://tools.ietf.org/html/rfc793
 #[derive(Clone, Debug)]
@@ -206,16 +206,4 @@ pub enum TcpOption<'a> {
     Timestamps(u32, u32),
     MD5(&'a [u8]),
     Other(u8, u8, &'a [u8]),
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use nom::IResult;
-
-    #[test]
-    fn test_ip_flags() {
-        // TODO
-        unimplemented!()
-    }
 }
