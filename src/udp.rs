@@ -1,4 +1,4 @@
-use nom::{rest, be_u16};
+use nom::{be_u16};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UdpHeader {
@@ -32,7 +32,7 @@ pub struct UdpPacket<'a> {
 named!(pub parse_udp_packet<UdpPacket>,
     do_parse!(
         header: parse_udp_header >>
-        body: rest >>
+        body: take!(header.len-8) >>
         (UdpPacket {
             header: header,
             body: body,
