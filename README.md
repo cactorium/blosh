@@ -1,9 +1,11 @@
 # Blosh
 nom-based parsers for Internet packets
 
-- [ ] Ethernet
-- [ ] IP
-- [ ] TCP
-- [ ] UDP
+- [x] Ethernet II
+- [x] IPv4
+- [x] IPv6
+- [x] TCP
+- [x] UDP
 - [x] DNS
-- [ ] Telnet
+- [ ] ICMP
+- [ ] "cooked" Linux
