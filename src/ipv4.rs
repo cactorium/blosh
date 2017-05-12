@@ -9,7 +9,6 @@ pub struct Packet<'a> {
 pub fn parse_ipv4_packet<'a>(bs: &'a [u8]) -> IResult<&'a [u8], Packet<'a>, u32> {
     match parse_ipv4_header(bs) {
         IResult::Done(_, header) => {
-            println!("{:?}", &header);
             IResult::Done(&bs[header.total_len as usize..], Packet {
                 body: &bs[4*header.len as usize..],
                 header: header,
@@ -36,7 +35,7 @@ pub struct Header<'a> {
     pub source_ip: &'a[u8],
     // NOTE: network order; MSB first
     pub dst_ip: &'a[u8],
-    pub options: Vec<PacketOption<'a>>,
+    pub options: Vec<Ipv4Option<'a>>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -46,40 +45,40 @@ pub struct Flags {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum PacketOption<'a> {
+pub enum Ipv4Option<'a> {
     EndOfOption,
     NoOperation,
     Other(u8, u8, &'a [u8]),
     Dummy
 }
 
-named!(test_eof<PacketOption>,
-    map!(eof!(), |_| PacketOption::Dummy)
-);
+fn test_eof<'a>(bs: &'a [u8]) -> IResult<&'a [u8], Ipv4Option<'a>, u32> {
+    cond_reduce!(bs, bs.len() == 0, value!(Ipv4Option::Dummy))
+}
 
 
-named!(parse_options<Vec<PacketOption> >,
+named!(parse_options<Vec<Ipv4Option> >,
    do_parse!(
         options: many_till!(
             alt!(
+                call!(test_eof) |
                 do_parse!(
                     _a: char!(0x01 as char) >>
-                    (PacketOption::NoOperation)
+                    (Ipv4Option::NoOperation)
                 ) |
                 do_parse!(
                     class: be_u8 >>
                     length: be_u8 >>
                     data: take!(length - 2) >>
-                    (PacketOption::Other(class, length, data))
-                ) |
-                call!(test_eof)
+                    (Ipv4Option::Other(class, length, data))
+                )
             ),
             alt!(
+                call!(test_eof) |
                 do_parse!(
                     _a: char!(0x00 as char) >>
-                    (PacketOption::EndOfOption)
-                ) |
-                call!(test_eof)
+                    (Ipv4Option::EndOfOption)
+                )
             )
         ) >> 
         ({
@@ -88,7 +87,7 @@ named!(parse_options<Vec<PacketOption> >,
             options
                 .into_iter()
                 .filter(|o| match o {
-                    &PacketOption::Dummy => false,
+                    &Ipv4Option::Dummy => false,
                     _ => true,
                 })
                 .collect()

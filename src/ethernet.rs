@@ -1,4 +1,4 @@
-use nom::{be_u32, rest, IResult};
+use nom::{rest, IResult};
 
 #[derive(Clone, Debug)]
 pub struct EthernetIIPacket<'a> {

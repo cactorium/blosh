@@ -14,7 +14,7 @@ pub mod udp;
 
 // application level parsers
 pub mod dns;
-// pub mod telnet;
+// pub mod smtp;
 
 #[cfg(test)]
 mod tests {
@@ -48,5 +48,6 @@ mod tests {
         let (left, tcp_packet) = tcp::parse_tcp_packet(ipv4_packet.body).unwrap();
         println!("{:?}", &tcp_packet);
         assert_eq!(left.len(), 0);
+        assert!(false);
     }
 }

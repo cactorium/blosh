@@ -1,4 +1,4 @@
-use nom::{be_u8, be_u16, be_u32, IResult};
+use nom::{be_u8, be_u16, be_u32, rest, IResult};
 
 // https://tools.ietf.org/html/rfc793
 #[derive(Clone, Debug)]
@@ -123,7 +123,7 @@ impl TcpFlags {
 
 
 fn known_options<'a>(bs: &'a [u8]) -> IResult<&'a [u8], TcpOption<'a>, u32> {
-   alt!(
+    alt!(
         bs,
         call!(eof_check) |
         do_parse!(
@@ -160,20 +160,17 @@ fn known_options<'a>(bs: &'a [u8]) -> IResult<&'a [u8], TcpOption<'a>, u32> {
 
 // FIXME: make this nicer
 fn eof_check<'a>(bs: &'a [u8]) -> IResult<&'a [u8], TcpOption<'a>, u32> {
-    map!(
-        bs,
-        eof!(),
-        |_| TcpOption::DummyOption)
+    cond_reduce!(bs, bs.len() == 0, value!(TcpOption::DummyOption))
 }
 
 fn end_of_options<'a>(bs: &'a [u8]) -> IResult<&'a [u8], TcpOption<'a>, u32> {
     alt!(
         bs,
+        call!(eof_check) |
         do_parse!(
             _a: char!(0x00 as char) >>
             (TcpOption::EndOfOptionList)
-        ) |
-        call!(eof_check)
+        )
     )
 }
 
