@@ -11,7 +11,7 @@ pub fn parse_ipv4_packet<'a>(bs: &'a [u8]) -> IResult<&'a [u8], Ipv4Packet<'a>, 
     match parse_ipv4_header(bs) {
         IResult::Done(_, header) => {
             IResult::Done(&b""[..], Ipv4Packet {
-                body: &bs[min(4*header.len as usize, bs.len())..],
+                body: &bs[min(4*header.len as usize, bs.len())..min(header.total_len as usize, bs.len())],
                 header: header,
             })
         },
