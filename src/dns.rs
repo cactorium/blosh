@@ -42,7 +42,14 @@ pub fn parse_dns_message_full<'a>(bytestr: &'a [u8]) -> IResult<&'a [u8], Messag
                             dict.insert(*off, domain.clone());
                             Some(domain)
                         },
-                        _ => None,
+                        IResult::Incomplete(o) => {
+                            println!("dns deref incomplete {:?}, {:?}", &o, bytestr);
+                            None
+                        },
+                        IResult::Error(e) => {
+                            println!("dns deref err {:?}, {:?}", e, bytestr);
+                            None
+                        },
                     }
                 }
             },
