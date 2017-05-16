@@ -67,26 +67,59 @@ pub fn parse_dns_message_full<'a>(bytestr: &'a [u8]) -> IResult<&'a [u8], Messag
                     None
                 }
             },
-            _ => unreachable!("nonpointer name!"),
+            x => Some(x.clone()),
         }
     }
 
     fn fix_record<'a>(record: &mut ResourceRecord<'a>, dict: &mut HashMap<u16, DomainName<'a>>,
                       bytestr: &'a [u8]) {
-        let change_name = match &record.name {
-            &DomainName::Pointer(_) | &DomainName::LabelWithPointer(_, _) => true,
-            _ => false,
-        };
-        if change_name {
-            match domain_deref(&record.name, dict, bytestr) {
-                Some(domain) => record.name = domain,
-                _ => {},
-            }
+        match domain_deref(&record.name, dict, bytestr) {
+            Some(domain) => record.name = domain,
+            _ => {},
         }
 
         // TODO: check the rdata field to see if it's a domain name
+        match &mut record.rdata {
+            &mut Rdata::Cname(ref mut domain) | &mut Rdata::MB(ref mut domain) |
+                &mut Rdata::MD(ref mut domain) | &mut Rdata::MF(ref mut domain) |
+                &mut Rdata::MG(ref mut domain) | &mut Rdata::MR(ref mut domain) |
+                &mut Rdata::NS(ref mut domain) | &mut Rdata::Ptr(ref mut domain) => {
+                    match domain_deref(&domain, dict, bytestr) {
+                        Some(new_domain) => *domain = new_domain,
+                        _ => {},
+                    }
+            },
+            &mut Rdata::Minfo(ref mut minfo) => {
+                match domain_deref(&minfo.rmailbox, dict, bytestr) {
+                    Some(new_domain) => minfo.rmailbox = new_domain,
+                    _ => {},
+                }
+                match domain_deref(&minfo.emailbox, dict, bytestr) {
+                    Some(new_domain) => minfo.emailbox = new_domain,
+                    _ => {},
+                }
+            },
+            &mut Rdata::MX(ref mut mx) => {
+                match domain_deref(&mx.exchange, dict, bytestr) {
+                    Some(new_domain) => mx.exchange = new_domain,
+                    _ => {},
+                }
+            },
+            &mut Rdata::Soa(ref mut soa) => {
+                match domain_deref(&soa.mname, dict, bytestr) {
+                    Some(new_domain) => soa.mname= new_domain,
+                    _ => {},
+                }
+                match domain_deref(&soa.rname, dict, bytestr) {
+                    Some(new_domain) => soa.rname = new_domain,
+                    _ => {},
+                }
+            },
+            &mut Rdata::Hinfo(_) | &mut Rdata::Null(_) | &mut Rdata::Txt(_) |
+                &mut Rdata::A(_) | &mut Rdata::Wks(_) | &mut Rdata::AAAA(_) |
+                &mut Rdata::Unknown(_) => {},
+        }
     }
-
 
     parse_dns_message(bytestr)
         .map(|mut msg| {
