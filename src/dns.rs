@@ -64,7 +64,14 @@ pub fn parse_dns_message_full<'a>(bytestr: &'a [u8]) -> IResult<&'a [u8], Messag
                             dict.insert(*off, domain_name.clone());
                             domain_name
                         },
-                        _ => { return None; },
+                        IResult::Incomplete(o) => {
+                            println!("dns deref incomplete {:?}, {:?}", &o, bytestr);
+                            return None;
+                        },
+                        IResult::Error(e) => {
+                            println!("dns deref err {:?}, {:?}", e, bytestr);
+                            return None;
+                        },
                     }
                 };
                 if let DomainName::Labels(ref to_add) = to_add {
