@@ -80,8 +80,10 @@ pub fn parse_dns_message_full<'a>(bytestr: &'a [u8]) -> IResult<&'a [u8], Messag
                 };
                 if let DomainName::Labels(ref to_add) = to_add {
                     list.extend(to_add);
+                    println!("list {}", &list);
                     Some(DomainName::Labels(list))
                 } else {
+                    println!("deref fail", &list);
                     None
                 }
             },
