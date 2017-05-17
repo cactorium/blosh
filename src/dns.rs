@@ -31,6 +31,7 @@ pub fn parse_dns_message_full<'a>(bytestr: &'a [u8]) -> IResult<&'a [u8], Messag
     use std::collections::HashMap;
 
     fn domain_deref<'a>(domain: &DomainName<'a>, dict: &mut HashMap<u16, DomainName<'a>>, bytestr: &'a [u8]) -> Option<DomainName<'a>> {
+        println!("dns deref {:?}", domain);
         match domain {
             &DomainName::Pointer(ref off) => {
                 if dict.contains_key(off) {
