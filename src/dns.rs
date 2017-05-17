@@ -57,9 +57,12 @@ pub fn parse_dns_message_full<'a>(bytestr: &'a [u8]) -> IResult<&'a [u8], Messag
             &DomainName::LabelWithPointer(ref list, ref off) => {
                 let mut list = list.clone();
                 let to_add = if dict.contains_key(off) {
+                    println!("lwp keymatch");
                     dict[off].clone()
                 } else {
+                    println!("lwp nomatch");
                     let new_domain_ref = domain_name(&bytestr[*off as usize..]);
+                    println!("{:?}, {:?}", new_domain_ref, bytestr);
                     match new_domain_ref {
                         IResult::Done(_, domain_name) => {
                             dict.insert(*off, domain_name.clone());
