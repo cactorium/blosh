@@ -30,8 +30,7 @@ named!(pub parse_dns_message<Message>,
 pub fn parse_dns_message_full<'a>(bytestr: &'a [u8]) -> IResult<&'a [u8], Message<'a>, u32> {
     use std::collections::HashMap;
 
-    fn domain_deref<'a>(domain: &DomainName<'a>, dict: &mut HashMap<u16, DomainName<'a>>, bytestr: &'a [u8]) -> Option<DomainName<'a>> {
-        println!("dns deref {:?}", domain);
+    fn deref_helper<'a>(domain: &DomainName<'a>, dict: &mut HashMap<u16, DomainName<'a>>, bytestr: &'a [u8]) -> Option<DomainName<'a>> {
         match domain {
             &DomainName::Pointer(ref off) => {
                 if dict.contains_key(off) {
@@ -43,52 +42,56 @@ pub fn parse_dns_message_full<'a>(bytestr: &'a [u8]) -> IResult<&'a [u8], Messag
                             dict.insert(*off, domain.clone());
                             Some(domain)
                         },
-                        IResult::Incomplete(o) => {
-                            println!("dns deref incomplete {:?}, {:?}", &o, bytestr);
-                            None
-                        },
-                        IResult::Error(e) => {
-                            println!("dns deref err {:?}, {:?}", e, bytestr);
-                            None
-                        },
+                        _ => None,
                     }
                 }
             },
             &DomainName::LabelWithPointer(ref list, ref off) => {
                 let mut list = list.clone();
                 let to_add = if dict.contains_key(off) {
-                    println!("lwp keymatch");
                     dict[off].clone()
                 } else {
-                    println!("lwp nomatch");
                     let new_domain_ref = domain_name(&bytestr[*off as usize..]);
-                    println!("{:?}, {:?}", new_domain_ref, bytestr);
                     match new_domain_ref {
                         IResult::Done(_, domain_name) => {
                             dict.insert(*off, domain_name.clone());
                             domain_name
                         },
-                        IResult::Incomplete(o) => {
-                            println!("dns deref incomplete {:?}, {:?}", &o, bytestr);
-                            return None;
-                        },
-                        IResult::Error(e) => {
-                            println!("dns deref err {:?}, {:?}", e, bytestr);
+                        _  => {
                             return None;
                         },
                     }
                 };
                 if let DomainName::Labels(ref to_add) = to_add {
                     list.extend(to_add);
-                    println!("list {}", &list);
                     Some(DomainName::Labels(list))
                 } else {
-                    println!("deref fail", &list);
                     None
                 }
             },
             x => Some(x.clone()),
         }
+    }
+
+    fn domain_deref<'a>(domain: &DomainName<'a>, dict: &mut HashMap<u16, DomainName<'a>>, bytestr: &'a [u8]) -> Option<DomainName<'a>> {
+        let mut out = deref_helper(domain, dict, bytestr);
+        fn recurse<'a>(d: &Option<DomainName<'a>>) -> bool {
+            match d {
+                &Some(DomainName::Labels(_)) => false,
+                &Some(_) => true,
+                &None => false,
+            }
+        }
+        let mut should_recurse = recurse(&out);
+        while should_recurse {
+            let new_out = match out {
+                Some(domain) => deref_helper(&domain, dict, bytestr),
+                _ => None,
+            };
+            out = new_out;
+            should_recurse = recurse(&out);
+        }
+        out
     }
 
     fn fix_record<'a>(record: &mut ResourceRecord<'a>, dict: &mut HashMap<u16, DomainName<'a>>,
@@ -981,6 +984,85 @@ mod tests {
                     additional: vec![]
                 }
             )
+        );
+    }
+
+    #[test]
+    fn dns_deref() {
+        let msg = [
+            160, 219, 129, 128, 0, 1, 0, 2,
+            0, 0, 0, 0, 7, 97, 110, 100,
+            114, 111, 105, 100, 7, 99, 108, 105,
+            101, 110, 116, 115, 6, 103, 111, 111,
+            103, 108, 101, 3, 99, 111, 109, 0,
+            0, 1, 0, 1, 192, 12, 0, 5, 0,
+            1, 0, 0, 0, 69, 0, 12, 7, 97,
+            110, 100, 114, 111, 105, 100, 1, 108,
+            192, 28, 192, 56, 0, 1, 0, 1,
+            0, 0, 0, 69, 0, 4, 216, 58, 219,
+            78
+        ];
+        assert_eq!(
+            parse_dns_message_full(&msg),
+            IResult::Done(
+                &b""[..],
+                Message {
+                    header: Header {
+                        id: 41179,
+                        qr: QR::Response,
+                        opcode: Opcode::Query,
+                        aa: false,
+                        tc: false,
+                        rd: true,
+                        ra: true,
+                        rcode: Rcode::NoError,
+                        qdcount: 1,
+                        ancount: 2,
+                        nscount: 0,
+                        arcount: 0
+                    },
+                    questions: vec![
+                        Query {
+                            qname: DomainName::Labels(vec![
+                                          &[97, 110, 100, 114, 111, 105, 100],
+                                          &[99, 108, 105, 101, 110, 116, 115],
+                                          &[103, 111, 111, 103, 108, 101],
+                                          &[99, 111, 109]]),
+                            qtype: Qtype::Type(Type::A),
+                            qclass: Qclass::Class(Class::IN)
+                        }
+                    ],
+                    answers: vec![
+                        ResourceRecord {
+                            name: DomainName::Labels(vec![
+                                                     &[97, 110, 100, 114, 111, 105, 100],
+                                                     &[99, 108, 105, 101, 110, 116, 115],
+                                                     &[103, 111, 111, 103, 108, 101],
+                                                     &[99, 111, 109]]),
+                            typ: Type::Cname,
+                            class: Class::IN,
+                            ttl: 69,
+                            rdata: Rdata::Cname(DomainName::Labels(vec![
+                                                                   &[97, 110, 100, 114, 111, 105, 100],
+                                                                   &[108],
+                                                                   &[103, 111, 111, 103, 108, 101],
+                                                                   &[99, 111, 109]]))
+                        },
+                        ResourceRecord {
+                            name: DomainName::Labels(vec![
+                                                     &[97, 110, 100, 114, 111, 105, 100],
+                                                     &[108],
+                                                     &[103, 111, 111, 103, 108, 101],
+                                                     &[99, 111, 109]]),
+                            typ: Type::A,
+                            class: Class::IN,
+                            ttl: 69,
+                            rdata: Rdata::A(&[216, 58, 219, 78])
+                        }
+                    ],
+                    authorities: vec![],
+                    additional: vec![]
+                })
         );
     }
 }
