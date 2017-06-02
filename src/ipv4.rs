@@ -1,3 +1,5 @@
+use std::net::Ipv4Addr;
+
 use nom::{be_u8, be_u16, IResult};
 
 #[derive(Clone, Debug)]
@@ -33,9 +35,9 @@ pub struct Header<'a> {
     pub proto: Ipv4Protocol,
     pub checksum: u16,
     // NOTE: network order; MSB first
-    pub source_ip: &'a[u8],
+    pub src_ip: Ipv4Addr,
     // NOTE: network order; MSB first
-    pub dst_ip: &'a[u8],
+    pub dst_ip: Ipv4Addr,
     pub options: Vec<Ipv4Option<'a>>,
 }
 
@@ -123,7 +125,7 @@ pub fn parse_ipv4_header<'a>(bs: &'a [u8]) -> IResult<&'a [u8], Header<'a>, u32>
         ttl: be_u8 >>
         proto: be_u8 >>
         checksum: be_u16 >>
-        source: take!(4) >>
+        src: take!(4) >>
         dst: take!(4) >>
         options: cond!(first_bits.0 > 5,
             parse_options
@@ -149,8 +151,8 @@ pub fn parse_ipv4_header<'a>(bs: &'a [u8]) -> IResult<&'a [u8], Header<'a>, u32>
                 ttl: ttl,
                 proto: Ipv4Protocol::from_u8(proto),
                 checksum: checksum,
-                source_ip: source,
-                dst_ip: dst,
+                src_ip: Ipv4Addr::new(src[0], src[1], src[2], src[3]),
+                dst_ip: Ipv4Addr::new(dst[0], dst[1], dst[2], dst[3]),
                 options: unwrapped_options,
             }
         })

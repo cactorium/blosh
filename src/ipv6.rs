@@ -1,3 +1,5 @@
+use std::net::Ipv6Addr;
+
 use std::cmp::min;
 
 use nom::{be_u8, be_u16, be_u32, rest, IResult};
@@ -6,7 +8,7 @@ use ::ipv4::Ipv4Protocol;
 
 #[derive(Clone, Debug)]
 pub struct Ipv6Packet<'a> {
-    pub header: Ipv6Header<'a>,
+    pub header: Ipv6Header,
     pub extensions: Vec<Ipv6Extension<'a>>,
     pub body: &'a [u8],
 }
@@ -68,19 +70,32 @@ fn parse_extensions<'a>(mut bs: &'a [u8], mut header_type: Ipv6HeaderType) -> IR
 
 // TODO: wrap IP addresses in a struct to allow Deref to std::net::IpAddr 
 #[derive(Clone, Copy, Debug)]
-pub struct Ipv6Header<'a> {
+pub struct Ipv6Header {
     pub traffic_class: u8,
     pub flow_label: u32,
     pub payload_length: u16,
     pub next_header: Ipv6HeaderType,
     pub hop_limit: u8,
-    pub src_ip: &'a [u8],
-    pub dst_ip: &'a [u8],
+    pub src_ip: Ipv6Addr,
+    pub dst_ip: Ipv6Addr,
 }
 
 struct Bitfields {
     traffic_class: u8,
     flow_label: u32,
+}
+
+pub fn slice2addr(ip: &[u8]) -> Ipv6Addr {
+    let pair = |x, y| ((x as u16) << 8) | (y as u16);
+    Ipv6Addr::new(
+        pair(ip[0], ip[1]),
+        pair(ip[2], ip[3]),
+        pair(ip[4], ip[5]),
+        pair(ip[6], ip[6]),
+        pair(ip[8], ip[9]),
+        pair(ip[10], ip[11]),
+        pair(ip[12], ip[13]),
+        pair(ip[14], ip[15]))
 }
 
 named!(pub parse_ipv6_header<Ipv6Header>,
@@ -107,8 +122,8 @@ named!(pub parse_ipv6_header<Ipv6Header>,
             payload_length: payload_length,
             next_header: Ipv6HeaderType::from_u8(next_header),
             hop_limit: hop_limit,
-            src_ip: src,
-            dst_ip: dst,
+            src_ip: slice2addr(src),
+            dst_ip: slice2addr(dst),
         })
     )
 );

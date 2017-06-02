@@ -25,7 +25,7 @@ pub enum IpPacket<'a> {
 #[derive(Clone, Debug)]
 pub enum IpHeader<'a> {
     V4(&'a ipv4::Header<'a>),
-    V6(&'a ipv6::Ipv6Header<'a>),
+    V6(&'a ipv6::Ipv6Header),
 }
 
 pub fn parse_ip_packet<'a>(bs: &'a [u8]) -> Result<IpPacket<'a>, nom::IError> {
